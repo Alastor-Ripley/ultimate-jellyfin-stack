@@ -114,21 +114,6 @@ services:
       - starr
     restart: unless-stopped
 
-  #Kapowarr - Used to download comics
-  kapowarr:
-    image: 'mrcas/kapowarr:latest'
-    container_name: kapowarr
-    network_mode: "service:gluetun"
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-    volumes:
-      - ${BASE_PATH}/kapowarr/config:/app/db
-      - ${MEDIA_SHARE}/temp_downloads:/app/temp_downloads
-      - ${MEDIA_SHARE}:/data
-    restart: unless-stopped
-    
   #Prowlarr - manages your Sonarr, Radarr and download client
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
@@ -257,37 +242,6 @@ services:
     networks:
       - starr
       - proxy
-      
-  #Cross Seed - used to take torrents from one tracker and seed them on another without leeching first. Increases ratio
-  #
-  #This is fairly advanced but can be removed if you don't think you will need it. Some trackers also don't allow this
-  cross-seed:
-    image: ghcr.io/cross-seed/cross-seed:latest
-    container_name: cross-seed
-    network_mode: "service:gluetun"
-    user: ${PUID}:${PGID}
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-    volumes:
-      - ${BASE_PATH}/cross-seed/config:/config #To configure you have to manually nano the config file
-      - ${BASE_PATH}/qbittorent/config/qBittorrent/BT_backup:/torrents:ro # your torrent clients .torrent cache, can and should be mounted read-only (e.g. qbit: `BT_Backup` | deluge: `state` | transmission: `transmission/torrents` | rtorrent: session dir from `.rtorrent.rc`)
-      - ${MEDIA_SHARE}/torrents/cross-seed:/data/cross-seeds
-      # - ${MEDIA_SHARE}/cross-seed/current-cross-seeds:/data/cross-seeds # A place to temp save current cross seed .torrent files
-      #- ${MEDIA_SHARE}/downloads:/data # OPTIONAL!!! this is dataDir path (for data-based matching) - will need to replicate your torrent client's container path (like Arr's do)
-    command: daemon # this enables the search mode, change to daemon to specifically run the daemon
-    
-  #Wizarr - Allows you to create a share link that you can send to users to invite them to your media server
-  wizarr:
-    container_name: wizarr
-    image: ghcr.io/wizarrrr/wizarr:latest
-    ports:
-      - 5690:5690
-    volumes:
-      - ${BASE_PATH}/wizarr/data/database:/data/database
-    networks:
-      - proxy
-      - starr
       
   #Dozzle - Used to easily view logs of any container in real time!    
   dozzle:
