@@ -11,12 +11,306 @@ networks:
     external: true
   gluetun_network:
     external: true
-      
+
 services:
   # REVERSE PROXY IS IN OTHER DOCKER COMPOSE STACK
 
   #Jellyfin - used to display the media
   #This can also be replaced by Emby/Plex
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: gethomepage.dev # required, may need port. See gethomepage.dev/installation/#homepage_allowed_hosts
+      PUID: 1000
+      PGID: 1000
+    ports:
+      - 3000:3000
+    volumes:
+      - /path/to/config:/app/config # Make sure your local config directory exists
+      - /var/run/docker.sock:/var/run/docker.sock:ro # optional, for docker integrations
+    restart: unless-stopped
+
+  octoprint:
+    image: octoprint/octoprint
+    restart: unless-stopped
+    ports:
+      - 80:80
+    # devices:
+    # use `python -m serial.tools.miniterm` to see what the name is of the printer, this requires pyserial
+    #  - /dev/ttyACM0:/dev/ttyACM0
+    #  - /dev/video0:/dev/video0
+    volumes:
+      - octoprint:/octoprint
+      # uncomment the lines below to ensure camera streaming is enabled when
+      # you add a video device
+      #environment:
+      #  - ENABLE_MJPG_STREAMER=true
+
+  # # ##
+  # uncomment if you wish to edit the configuration files of octoprint
+  # refer to docs on configuration editing for more information
+  # # ##
+
+  #config-editor:
+  #  image: linuxserver/code-server
+  #  ports:
+  #    - 8443:8443
+  #  depends_on:
+  #    - octoprint
+  #  restart: unless-stopped
+  #  environment:
+  #    - PUID=0
+  #    - PGID=0
+  #    - TZ=America/Chicago
+  #  volumes:
+  #    - octoprint:/octoprint
+  stash:
+    image: nerethos/stash:latest
+    container_name: stash
+    restart: unless-stopped
+    ## the container's port must be the same with the STASH_PORT in the environment section
+    ports:
+      - "9999:9999"
+    ## If you intend to use stash's DLNA functionality uncomment the below network mode and comment out the above ports section
+    # network_mode: host
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "10"
+        max-size: "2m"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - STASH_STASH=/data/
+      - STASH_GENERATED=/generated/
+      - STASH_METADATA=/metadata/
+      - STASH_CACHE=/cache/
+      ## Adjust below to change default port (9999)
+      - STASH_PORT=9999
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      ## Adjust below paths (the left part) to your liking.
+      ## E.g. you can change ./config:/root/.stash to ./stash:/root/.stash
+
+      ## Keep configs, scrapers, and plugins here.
+      - ./config:/root/.stash
+      ## Point this at your collection.
+      - ./data:/data
+      ## This is where your stash's metadata lives
+      - ./metadata:/metadata
+      ## Any other cache content.
+      - ./cache:/cache
+      ## Where to store binary blob data (scene covers, images)
+      - ./blobs:/blobs
+      ## Where to store generated content (screenshots,previews,transcodes,sprites)
+      - ./generated:/generated
+
+  whisparr:
+    container_name: whisparr
+    image: ghcr.io/hotio/whisparr
+    ports:
+      - "6969:6969"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+      - TZ=America/New_York
+    volumes:
+      - /<host_folder_config>:/config
+      - /<host_folder_data>:/data
+
+  dns-server:
+    container_name: dns-server
+    hostname: dns-server
+    image: technitium/dns-server:latest
+    # For DHCP deployments, use "host" network mode and remove all the port mappings, including the ports array by commenting them
+    # network_mode: "host"
+    ports:
+      - "5380:5380/tcp" #DNS web console (HTTP)
+      # - "53443:53443/tcp" #DNS web console (HTTPS)
+      - "53:53/udp" #DNS service
+      - "53:53/tcp" #DNS service
+      # - "853:853/udp" #DNS-over-QUIC service
+      # - "853:853/tcp" #DNS-over-TLS service
+      # - "443:443/udp" #DNS-over-HTTPS service (HTTP/3)
+      # - "443:443/tcp" #DNS-over-HTTPS service (HTTP/1.1, HTTP/2)
+      # - "80:80/tcp" #DNS-over-HTTP service (use with reverse proxy or certbot certificate renewal)
+      # - "8053:8053/tcp" #DNS-over-HTTP service (use with reverse proxy)
+      # - "67:67/udp" #DHCP service
+    environment:
+      - DNS_SERVER_DOMAIN=dns-server #The primary domain name used by this DNS Server to identify itself.
+      # - DNS_SERVER_ADMIN_PASSWORD=password #DNS web console admin user password.
+      # - DNS_SERVER_ADMIN_PASSWORD_FILE=password.txt #The path to a file that contains a plain text password for the DNS web console admin user.
+      # - DNS_SERVER_PREFER_IPV6=false #DNS Server will use IPv6 for querying whenever possible with this option enabled.
+      # - DNS_SERVER_WEB_SERVICE_LOCAL_ADDRESSES=172.17.0.1,127.0.0.1 #Comma separated list of network interface IP addresses that you want the web service to listen on for requests. The "172.17.0.1" address is the built-in Docker bridge. The "[::]" is the default value if not specified. Note! This must be used only with "host" network mode.
+      # - DNS_SERVER_WEB_SERVICE_HTTP_PORT=5380 #The TCP port number for the DNS web console over HTTP protocol.
+      # - DNS_SERVER_WEB_SERVICE_HTTPS_PORT=53443 #The TCP port number for the DNS web console over HTTPS protocol.
+      # - DNS_SERVER_WEB_SERVICE_ENABLE_HTTPS=false #Enables HTTPS for the DNS web console.
+      # - DNS_SERVER_WEB_SERVICE_USE_SELF_SIGNED_CERT=false #Enables self signed TLS certificate for the DNS web console.
+      # - DNS_SERVER_OPTIONAL_PROTOCOL_DNS_OVER_HTTP=false #Enables DNS server optional protocol DNS-over-HTTP on TCP port 8053 to be used with a TLS terminating reverse proxy like nginx.
+      # - DNS_SERVER_RECURSION=AllowOnlyForPrivateNetworks #Recursion options: Allow, Deny, AllowOnlyForPrivateNetworks, UseSpecifiedNetworkACL.
+      # - DNS_SERVER_RECURSION_NETWORK_ACL=192.168.10.0/24, !192.168.10.2 #Comma separated list of IP addresses or network addresses to allow access. Add ! character at the start to deny access, e.g. !192.168.10.0/24 will deny entire subnet. The ACL is processed in the same order its listed. If no networks match, the default policy is to deny all except loopback. Valid only for `UseSpecifiedNetworkACL` recursion option.
+      # - DNS_SERVER_RECURSION_DENIED_NETWORKS=1.1.1.0/24 #Comma separated list of IP addresses or network addresses to deny recursion. Valid only for `UseSpecifiedNetworkACL` recursion option. This option is obsolete and DNS_SERVER_RECURSION_NETWORK_ACL should be used instead.
+      # - DNS_SERVER_RECURSION_ALLOWED_NETWORKS=127.0.0.1, 192.168.1.0/24 #Comma separated list of IP addresses or network addresses to allow recursion. Valid only for `UseSpecifiedNetworkACL` recursion option.  This option is obsolete and DNS_SERVER_RECURSION_NETWORK_ACL should be used instead.
+      # - DNS_SERVER_ENABLE_BLOCKING=false #Sets the DNS server to block domain names using Blocked Zone and Block List Zone.
+      # - DNS_SERVER_ALLOW_TXT_BLOCKING_REPORT=false #Specifies if the DNS Server should respond with TXT records containing a blocked domain report for TXT type requests.
+      # - DNS_SERVER_BLOCK_LIST_URLS= #A comma separated list of block list URLs.
+      # - DNS_SERVER_FORWARDERS=1.1.1.1, 8.8.8.8 #Comma separated list of forwarder addresses.
+      # - DNS_SERVER_FORWARDER_PROTOCOL=Tcp #Forwarder protocol options: Udp, Tcp, Tls, Https, HttpsJson.
+      # - DNS_SERVER_LOG_USING_LOCAL_TIME=true #Enable this option to use local time instead of UTC for logging.
+    volumes:
+      - config:/etc/dns
+    restart: unless-stopped
+    sysctls:
+      - net.ipv4.ip_local_port_range=1024 65000
+
+
+  recyclarr:
+    image: ghcr.io/recyclarr/recyclarr
+    container_name: recyclarr
+    user: 1000:1000
+    networks: [recyclarr]
+    volumes:
+      - ./config:/config
+    environment:
+      - TZ=America/New_York
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: always
+    ports:
+      - "8000:8000"
+      - "9443:9443"
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+  godns:
+    # Check Docker Hub for timothyye/godns or other suitable images
+    image: timothyye/godns:latest
+    container_name: godns
+    environment:
+      # Inherit standard vars from Ansible playbook
+      - PUID={{ user_puid }} # Check if image respects PUID/PGID for config file own>
+      - PGID={{ user_pgid }} # May not be needed if container runs as root or handle>
+      - TZ={{ timezone }}
+      # Optional: Force config file path if needed by image
+      # - Conf=/app/config/config.yml
+    volumes:
+      # Mount the host directory where Ansible places the config file
+      - "{{ base_data_dir }}/godns/config:/app/config:ro" # Mount config read-only
+    restart: unless-stopped
+    # No ports needed usually
+    networks:
+      # Needs network to check public IP and contact IONOS API
+      - media_network
+
+
+  caddy:
+    image: caddy:<version>
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - $PWD/conf:/etc/caddy
+      - $PWD/site:/srv
+      - caddy_data:/data
+      - caddy_config:/config
+
+  authelia:
+    container_name: authelia
+    image: docker.io/authelia/authelia:latest
+    restart: unless-stopped
+    networks:
+      net:
+        aliases: []
+    environment:
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: '/secrets/JWT_SECRET'
+      AUTHELIA_SESSION_SECRET_FILE: '/secrets/SESSION_SECRET'
+      AUTHELIA_STORAGE_POSTGRES_PASSWORD_FILE: '/secrets/STORAGE_PASSWORD'
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: '/secrets/STORAGE_ENCRYPTION_KEY'
+    volumes:
+      - '${PWD}/data/authelia/config:/config'
+      - '${PWD}/data/authelia/secrets:/secrets'
+
+  crowdsec:
+  image: crowdsecurity/crowdsec
+  restart: always
+  environment:
+    COLLECTIONS: "crowdsecurity/nginx"
+    GID: "${GID-1000}"
+  depends_on:
+    - 'reverse-proxy'
+  volumes:
+    - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml
+    - logs:/var/log/nginx
+    - crowdsec-db:/var/lib/crowdsec/data/
+    - crowdsec-config:/etc/crowdsec/
+
+
+
+
+  endlessh:
+    container_name: endlessh
+    image: shizunge/endlessh-go:latest
+    restart: always
+    command:
+      - -interval_ms=1000
+      - -logtostderr
+      - -v=1
+      - -enable_prometheus
+      - -geoip_supplier=ip-api
+    networks:
+      - example_network
+    ports:
+      - 2222:2222 # SSH port
+      - 127.0.0.1:2112:2112 # Prometheus metrics port
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=45d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      - --web.enable-admin-api
+    networks:
+      - example_network
+    ports:
+      - 127.0.0.1:9090:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus:/prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: always
+    networks:
+      - example_network
+    ports:
+      - 127.0.0.1:3000:3000
+    environment:
+      - GF_SECURITY_ADMIN_USER=examples
+      - GF_SECURITY_ADMIN_PASSWORD=examples
+    volumes:
+      - grafana_var:/var/lib/grafana/
+      - ./grafana-datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml
+
+
+
+
+
   jellyfin:
     image: ghcr.io/linuxserver/jellyfin:latest
     container_name: jellyfin
@@ -28,7 +322,7 @@ services:
       - 8096:8096
       - 8920:8920
     devices:
-     - /dev/dri:/dev/dri #Required for jellyfin HW transcoding / QuickSync
+      - /dev/dri:/dev/dri #Required for jellyfin HW transcoding / QuickSync
     volumes:
       - ${BASE_PATH}/jellyfin/config:/config
       - ${MEDIA_SHARE}/media:/media
@@ -37,7 +331,7 @@ services:
     networks:
       - proxy
       - starr
-    
+
   #Radarr - used to find movies automatically
   radarr:
     image: lscr.io/linuxserver/radarr:latest
@@ -57,7 +351,7 @@ services:
       gluetun_network:
         ipv4_address: ${RADARR_IPV4}
     restart: unless-stopped
-    
+
   #Sonarr - used to find shows automatically
   sonarr:
     image: lscr.io/linuxserver/sonarr:latest
@@ -77,7 +371,7 @@ services:
       gluetun_network:
         ipv4_address: ${SONARR_IPV4}
     restart: unless-stopped
-  
+
   #Readarr - Used to download books
   readarr:
     image: lscr.io/linuxserver/readarr:develop
@@ -95,7 +389,7 @@ services:
       - proxy
       - starr
     restart: unless-stopped
-    
+
   #Lidarr - Used to download music 
   lidarr:
     image: lscr.io/linuxserver/lidarr:latest
@@ -126,7 +420,49 @@ services:
     volumes:
       - ${BASE_PATH}/prowlarr/config:/config
     restart: unless-stopped
-    
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    volumes:
+      - ./uptime-kuma-data:/app/data
+    ports:
+      - 3001:3001 # <Host Port>:<Container Port>
+    restart: always
+
+  scrutiny:
+    container_name: scrutiny
+    image: ghcr.io/analogj/scrutiny:master-omnibus
+    cap_add:
+      - SYS_RAWIO
+    ports:
+      - "8080:8080" # webapp
+      - "8086:8086" # influxDB admin
+    volumes:
+      - /run/udev:/run/udev:ro
+      - ./config:/opt/scrutiny/config
+      - ./influxdb:/opt/scrutiny/influxdb
+    devices:
+      - "/dev/sda"
+      - "/dev/sdb"
+
+
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: jackett
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - AUTO_UPDATE=true #optional
+      - RUN_OPTS= #optional
+    volumes:
+      - /path/to/jackett/data:/config
+      - /path/to/blackhole:/downloads
+    ports:
+      - 9117:9117
+    restart: unless-stopped
+
   #Autobrr - used to grab torrents using the trackers IRC channel - Increases seeding due to grabbing content before RSS feed
   autobrr:
     container_name: autobrr
@@ -157,7 +493,7 @@ services:
     ports:
       - 5055:5055
     restart: unless-stopped
-    
+
   #Flaresolerr - Used as a proxy server to bypass Cloudflare and DDoS-GUARD protection.
   flaresolverr:
     # DockerHub mirror flaresolverr/flaresolverr:latest
@@ -172,7 +508,7 @@ services:
       - LANG=en_GB
       - DRIVER=nodriver
     restart: unless-stopped
-      
+
   #Qbittorent - torrenting software
   #
   #You can also use RuTorrent, Transmisson or Deluge
@@ -213,7 +549,7 @@ services:
       - webUIPort=8265
       - internalNode=true
       - inContainer=true
-      - ffmpegVersion=6
+      - ffmpegVersion=7
     volumes:
       - ${BASE_PATH}/tdarr/server:/app/server
       - ${BASE_PATH}/tdarr/configs:/app/configs
@@ -221,28 +557,28 @@ services:
       - ${MEDIA_SHARE}:/data
       - ${TRANSCODE_PATH:-/transcode_cache}:/temp
     devices:
-     - /dev/dri:/dev/dri #Required for HW transcoding /share QuickSync
+      - /dev/dri:/dev/dri #Required for HW transcoding /share QuickSync
     networks:
       - proxy
-      
-  #Bazarr - for subtitles. Try to use SRT format if you can rather than PGS due to performance issues
-  bazarr:
-    container_name: bazarr
-    image: lscr.io/linuxserver/bazarr:latest
-    restart: unless-stopped
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
+
+  diun:
+    image: crazymax/diun:latest
+    container_name: diun
+    command: serve
     volumes:
-      - ${BASE_PATH}/bazarr/config:/config
-      - ${MEDIA_SHARE}:/data
-    ports:
-      - 6767:6767
-    networks:
-      - starr
-      - proxy
-      
+      - "./data:/data"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    environment:
+      - "TZ=Europe/Paris"
+      - "LOG_LEVEL=info"
+      - "LOG_JSON=false"
+      - "DIUN_WATCH_WORKERS=20"
+      - "DIUN_WATCH_SCHEDULE=0 */6 * * *"
+      - "DIUN_WATCH_JITTER=30s"
+      - "DIUN_PROVIDERS_DOCKER=true"
+      - "DIUN_PROVIDERS_DOCKER_WATCHBYDEFAULT=true"
+    restart: always
+
   #Dozzle - Used to easily view logs of any container in real time!    
   dozzle:
     container_name: dozzle
@@ -251,7 +587,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - 9999:8080
-    
+
   #Unpacker - Used to unzip zipped files
   unpackerr:
     image: ghcr.io/hotio/unpackerr:latest
@@ -302,7 +638,7 @@ services:
       - PGID=${PGID}
     networks:
       - proxy
-      
+
   gluetun:
     image: qmcgaw/gluetun:latest
     container_name: gluetun
@@ -333,8 +669,8 @@ services:
       - starr
       - proxy
       - gluetun_network
-    # IF VPN CANNOT CONNECT, USE BELOW COMMAND TO UPDATE SERVERS.
-    # command: update -enduser -providers mullvad
+      # IF VPN CANNOT CONNECT, USE BELOW COMMAND TO UPDATE SERVERS.
+      # command: update -enduser -providers mullvad
 
   homarr:
     container_name: homarr
@@ -355,53 +691,45 @@ services:
     container_name: decluttarr
     restart: always
     environment:
-     TZ: ${TZ}
-     PUID: ${PUID}
-     PGID: ${PGID}
-     ## General
-     # TEST_RUN=True
-     # SSL_VERIFICATION=False
-     LOG_LEVEL: INFO
-     ## Features 
-     REMOVE_TIMER: 10
-     REMOVE_FAILED: True
-     REMOVE_FAILED_IMPORTS: True
-     REMOVE_METADATA_MISSING: True
-     REMOVE_MISSING_FILES: True
-     REMOVE_ORPHANS: True
-     REMOVE_SLOW: True
-     REMOVE_STALLED: True
-     REMOVE_UNMONITORED: True
-     RUN_PERIODIC_RESCANS: '
-        {
-          "SONARR": {"MISSING": true, "CUTOFF_UNMET": true, "MAX_CONCURRENT_SCANS": 3, "MIN_DAYS_BEFORE_RESCAN": 7},
-          "RADARR": {"MISSING": true, "CUTOFF_UNMET": true, "MAX_CONCURRENT_SCANS": 3, "MIN_DAYS_BEFORE_RESCAN": 7}
-        }'
-     # Feature Settings
-     PERMITTED_ATTEMPTS: 3
-     NO_STALLED_REMOVAL_QBIT_TAG: Don't Kill
-     MIN_DOWNLOAD_SPEED: 100     
-     FAILED_IMPORT_MESSAGE_PATTERNS: '
-        [
-          "Not a Custom Format upgrade for existing", 
-          "Not an upgrade for existing"
-        ]'
-     ## Radarr
-     RADARR_URL: http://radarr:7878
-     RADARR_KEY: $RADARR_KEY
-     ## Sonarr
-     SONARR_URL: http://sonarr:8989
-     SONARR_KEY: $SONARR_KEY
-     ## Lidarr
-     LIDARR_URL: http://lidarr:8686
-     LIDARR_KEY: $LIDARR_KEY
-     ## Readarr
-     READARR_URL: http://readarr:8787
-     READARR_KEY: $READARR_KEY
-     ## qBitorrent
-     QBITTORRENT_URL: http://gluetun:8080
-     QBITTORRENT_USERNAME: $QBIT_USER
-     QBITTORRENT_PASSWORD: $QBIT_PASS
+      TZ: ${TZ}
+      PUID: ${PUID}
+      PGID: ${PGID}
+      ## General
+      # TEST_RUN=True
+      # SSL_VERIFICATION=False
+      LOG_LEVEL: INFO
+      ## Features
+      REMOVE_TIMER: 10
+      REMOVE_FAILED: True
+      REMOVE_FAILED_IMPORTS: True
+      REMOVE_METADATA_MISSING: True
+      REMOVE_MISSING_FILES: True
+      REMOVE_ORPHANS: True
+      REMOVE_SLOW: True
+      REMOVE_STALLED: True
+      REMOVE_UNMONITORED: True
+      RUN_PERIODIC_RESCANS: ' { "SONARR": {"MISSING": true, "CUTOFF_UNMET": true, "MAX_CONCURRENT_SCANS": 3, "MIN_DAYS_BEFORE_RESCAN": 7}, "RADARR": {"MISSING": true, "CUTOFF_UNMET": true, "MAX_CONCURRENT_SCANS": 3, "MIN_DAYS_BEFORE_RESCAN": 7} }'
+      # Feature Settings
+      PERMITTED_ATTEMPTS: 3
+      NO_STALLED_REMOVAL_QBIT_TAG: Don't Kill
+      MIN_DOWNLOAD_SPEED: 100
+      FAILED_IMPORT_MESSAGE_PATTERNS: ' [ "Not a Custom Format upgrade for existing", "Not an upgrade for existing" ]'
+      ## Radarr
+      RADARR_URL: http://radarr:7878
+      RADARR_KEY: $RADARR_KEY
+      ## Sonarr
+      SONARR_URL: http://sonarr:8989
+      SONARR_KEY: $SONARR_KEY
+      ## Lidarr
+      LIDARR_URL: http://lidarr:8686
+      LIDARR_KEY: $LIDARR_KEY
+      ## Readarr
+      READARR_URL: http://readarr:8787
+      READARR_KEY: $READARR_KEY
+      ## qBitorrent
+      QBITTORRENT_URL: http://gluetun:8080
+      QBITTORRENT_USERNAME: $QBIT_USER
+      QBITTORRENT_PASSWORD: $QBIT_PASS
     networks:
       - starr
       - proxy
